@@ -1,7 +1,6 @@
 # Cisco CGI Messages
 Python Based WebApp that sends CGI Execute Requests to Cisco Enterprise Phone to show Prompts/PopUps
-![image](https://github.com/user-attachments/assets/2de74855-e71a-4d07-a3e9-bbd7c79b93b4)
-![image](https://github.com/user-attachments/assets/560f554a-fede-4bf5-9d12-3fb40019c873)
+
 ***
 Visit the [Wiki](a) for more information
 ***
