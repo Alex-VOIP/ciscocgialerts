@@ -5,6 +5,12 @@ from flask import Flask, render_template_string, request, redirect, url_for
 from flask_httpauth import HTTPBasicAuth
 from werkzeug.security import check_password_hash, generate_password_hash
 import requests
+import urllib3
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+
+# Disable SSL warnings for insecure HTTPS
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 auth = HTTPBasicAuth()
@@ -15,11 +21,86 @@ users = {
 
 # Fixed IPs and auth
 IP_ADDRESSES = ["10.0.0.109"] # IP's of phones (if multiple use format like this ["192.168.5.22", "192.168.5.30"])
-PORT = "80" #for https use 443
+PORT = "443" #HTTPS port
 USERNAME = "Cisco" #phones username
 PASSWORD = "Cisco" # phones password
 
-# Templates
+def create_session():
+    session = requests.Session()
+    
+    retry_strategy = Retry(
+        total=3,
+        status_forcelist=[429, 500, 502, 503, 504],
+        method_whitelist=["HEAD", "GET", "OPTIONS", "POST"]
+    )
+    
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
+    return session
+
+# Shortcusts You can change the as you want :)
+EMERGENCY_TEMPLATES = {
+    "lockdown": {
+        "name": "Lockdown",
+        "xml": '''<?xml version="1.0" encoding="UTF-8"?>
+<CiscoIPPhoneText>
+<Title>905 ALERT - SECURE</Title>
+<prompt>Select an Action</prompt>
+<Text>Secure the building. Bring all students inside and lock all exterior doors. Continue business as usual </Text>
+<SoftKeyItem>
+<Name>Stop</Name>
+<URL>SoftKey:Exit</URL>
+<Position>1</Position>
+</SoftKeyItem>
+<SoftKeyItem>
+<Name>Exit</Name>
+<URL>SoftKey:Exit</URL>
+<Position>4</Position>
+</SoftKeyItem>
+</CiscoIPPhoneText>'''
+    },
+    "tornado": {
+        "name": "Tornado",
+        "xml": '''<?xml version="1.0" encoding="UTF-8"?>
+<CiscoIPPhoneText>
+<Title>906 ALERT - SEVERE WEATHER</Title>
+<prompt>Select an Action</prompt>
+<Text>SEVERE WEATHER WARNING! Proceed to designated shelter areas immediately. Stay away from windows and doors.</Text>
+<SoftKeyItem>
+<Name>Stop</Name>
+<URL>SoftKey:Exit</URL>
+<Position>1</Position>
+</SoftKeyItem>
+<SoftKeyItem>
+<Name>Exit</Name>
+<URL>SoftKey:Exit</URL>
+<Position>4</Position>
+</SoftKeyItem>
+</CiscoIPPhoneText>'''
+    },
+    "active_shooter": {
+        "name": "Active Shooter",
+        "xml": '''<?xml version="1.0" encoding="UTF-8"?>
+<CiscoIPPhoneText>
+<Title>904 ALERT - ACTIVE SHOOTER</Title>
+<prompt>Select an Action</prompt>
+<Text>LOCKDOWN! THIS IS NOT A DRILL! An active shooter has been spotted on campus. Lights Out! Out of Sight! </Text>
+<SoftKeyItem>
+<Name>Stop</Name>
+<URL>SoftKey:Exit</URL>
+<Position>1</Position>
+</SoftKeyItem>
+<SoftKeyItem>
+<Name>Exit</Name>
+<URL>SoftKey:Exit</URL>
+<Position>4</Position>
+</SoftKeyItem>
+</CiscoIPPhoneText>'''
+    }
+}
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -36,6 +117,10 @@ HTML_TEMPLATE = """
         .shortcut { margin-bottom: 15px; }
         .shortcut form { display: inline; }
         .main { width: 65%; float: left; }
+        .emergency-btn { background-color: #dc3545 !important; }
+        .emergency-btn:hover { background-color: #c82333 !important; }
+        .weather-btn { background-color: #ffc107 !important; color: black !important; }
+        .weather-btn:hover { background-color: #e0a800 !important; }
     </style>
 </head>
 <body>
@@ -51,23 +136,23 @@ HTML_TEMPLATE = """
     </div>
 
     <div class="shortcuts">
-        <h2>Shortcuts</h2>
+        <h2>Emergency Alerts</h2>
         <div class="shortcut">
-            <form method="post" action="/send_shortcut">
-                <input type="hidden" name="url" value="http://provisioning.csptech.org/executelockdown.xml">
-                <input type="submit" value="Lockdown">
+            <form method="post" action="/send_emergency">
+                <input type="hidden" name="alert_type" value="lockdown">
+                <input type="submit" value="Lockdown" class="emergency-btn">
             </form>
         </div>
         <div class="shortcut">
-            <form method="post" action="/send_shortcut">
-                <input type="hidden" name="url" value="http://provisioning.csptech.org/weather.xml">
-                <input type="submit" value="Tornado">
+            <form method="post" action="/send_emergency">
+                <input type="hidden" name="alert_type" value="tornado">
+                <input type="submit" value="Tornado" class="weather-btn">
             </form>
         </div>
         <div class="shortcut">
-            <form method="post" action="/send_shortcut">
-                <input type="hidden" name="url" value="http://provisioning.csptech.org/activeshooter.xml">
-                <input type="submit" value="Active Shooter">
+            <form method="post" action="/send_emergency">
+                <input type="hidden" name="alert_type" value="active_shooter">
+                <input type="submit" value="Active Shooter" class="emergency-btn">
             </form>
         </div>
     </div>
@@ -76,34 +161,56 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# Auth handlers
 @auth.verify_password
 def verify_password(username, password):
     if username in users and check_password_hash(users.get(username), password):
         return username
 
-# Helper function to send CGI Execute
+def send_direct_xml(xml_content):
+    session = create_session()
+    
+    for ip in IP_ADDRESSES:
+        try:
+            response = session.post(
+                f'https://{ip}:{PORT}/CGI/Execute',
+                auth=(USERNAME, PASSWORD),
+                timeout=10,
+                data={'XML': xml_content},
+                verify=False
+            )
+            response.raise_for_status()
+            print(f"Emergency alert sent successfully to {ip}")
+        except requests.RequestException as e:
+            print(f"Failed to send emergency alert to {ip}: {e}")
+        finally:
+            session.close()
 
 def send_cgi_execute(url):
+    session = create_session()
+    
     xml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <CiscoIPPhoneExecute>
     <ExecuteItem URL="{url}" Priority="0" />
 </CiscoIPPhoneExecute>'''
+    
     for ip in IP_ADDRESSES:
         try:
-            response = requests.post(
-                f'http://{ip}:{PORT}/CGI/Execute',
+            response = session.post(
+                f'https://{ip}:{PORT}/CGI/Execute',
                 auth=(USERNAME, PASSWORD),
-                timeout=5,
-                data={'XML': xml}
+                timeout=10,
+                data={'XML': xml},
+                verify=False
             )
             response.raise_for_status()
         except requests.RequestException as e:
             print(f"Failed to send to {ip}: {e}")
-
-# Helper function to send text message
+        finally:
+            session.close()
 
 def send_cgi_text(title, text):
+    session = create_session()
+    
     xml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <CiscoIPPhoneText>
     <Title>{title}</Title>
@@ -114,19 +221,22 @@ def send_cgi_text(title, text):
         <Position>1</Position>
     </SoftKeyItem>
 </CiscoIPPhoneText>'''
+    
     for ip in IP_ADDRESSES:
         try:
-            response = requests.post(
-                f'http://{ip}:{PORT}/CGI/Execute',
+            response = session.post(
+                f'https://{ip}:{PORT}/CGI/Execute',
                 auth=(USERNAME, PASSWORD),
-                timeout=5,
-                data={'XML': xml}
+                timeout=10,
+                data={'XML': xml},
+                verify=False
             )
             response.raise_for_status()
         except requests.RequestException as e:
             print(f"Failed to send to {ip}: {e}")
+        finally:
+            session.close()
 
-# Routes
 @app.route('/')
 @auth.login_required
 def index():
@@ -140,6 +250,20 @@ def send_text():
     send_cgi_text(title, text)
     return redirect(url_for('index'))
 
+@app.route('/send_emergency', methods=['POST'])
+@auth.login_required
+def send_emergency():
+    alert_type = request.form.get('alert_type')
+    
+    if alert_type in EMERGENCY_TEMPLATES:
+        xml_content = EMERGENCY_TEMPLATES[alert_type]['xml']
+        send_direct_xml(xml_content)
+        print(f"Emergency alert '{alert_type}' sent to all phones")
+    else:
+        print(f"Unknown emergency alert type: {alert_type}")
+    
+    return redirect(url_for('index'))
+
 @app.route('/send_shortcut', methods=['POST'])
 @auth.login_required
 def send_shortcut():
@@ -148,4 +272,4 @@ def send_shortcut():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=4570, debug=False)
+    app.run(host='0.0.0.0', port=8081, debug=False)
