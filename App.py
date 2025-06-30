@@ -1,5 +1,5 @@
-# Authors: CSP Technologies, Ryan Kim
-print("Authors: CSP Technologies, Ryan Kim")
+# Authors: Unity Networx, Alex R
+print("Authors: Unity Networx, Alex R")
 
 from flask import Flask, render_template_string, request, redirect, url_for
 from flask_httpauth import HTTPBasicAuth
@@ -9,22 +9,22 @@ import requests
 app = Flask(__name__)
 auth = HTTPBasicAuth()
 
-# Fixed credentials
 users = {
-    "admin": generate_password_hash("admin") #web UI logon credentials
+    "admin": generate_password_hash("password") #Username and Password for the Web-UI
 }
 
 # Fixed IPs and auth
-IP_ADDRESSES = ["192.168.5.22", "192.168.5.30"] # put your cisco phone's ip seperated by commas
-USERNAME = "CSP" #phones username
-PASSWORD = "CSP" # phones password
+IP_ADDRESSES = ["10.0.0.109"] # IP's of phones (if multiple use format like this ["192.168.5.22", "192.168.5.30"])
+PORT = "80" #for https use 443
+USERNAME = "Cisco" #phones username
+PASSWORD = "Cisco" # phones password
 
 # Templates
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>CSP Cisco Alerting System</title>
+    <title>Cisco Alerting System</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f4; }
         h1 { color: #333; }
@@ -40,7 +40,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="main">
-    <h1>CSP Cisco Services</h1>
+    <h1>Cisco Services</h1>
     <form method="post" action="/send_text">
         <label>Title:</label>
         <input type="text" name="title" required>
@@ -92,7 +92,7 @@ def send_cgi_execute(url):
     for ip in IP_ADDRESSES:
         try:
             response = requests.post(
-                f'http://{ip}:80/CGI/Execute',
+                f'http://{ip}:{PORT}/CGI/Execute',
                 auth=(USERNAME, PASSWORD),
                 timeout=5,
                 data={'XML': xml}
@@ -117,7 +117,7 @@ def send_cgi_text(title, text):
     for ip in IP_ADDRESSES:
         try:
             response = requests.post(
-                f'http://{ip}:80/CGI/Execute',
+                f'http://{ip}:{PORT}/CGI/Execute',
                 auth=(USERNAME, PASSWORD),
                 timeout=5,
                 data={'XML': xml}
